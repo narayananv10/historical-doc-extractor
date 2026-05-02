@@ -1,1 +1,1 @@
-# Handwritten-Document-Digitizer
+# Historical-Doc-Extractor
