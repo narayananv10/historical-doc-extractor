@@ -45,5 +45,6 @@ jobs:
           import src.flagger
           import src.pipeline
           import src.batch
+          from src.postcorrect import CorrectedLine, post_correct
           print('all imports ok')
           "
