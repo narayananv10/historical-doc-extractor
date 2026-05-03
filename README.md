@@ -39,7 +39,12 @@ python -m spacy download en_core_web_sm   # use _trf instead if you have ≥16 G
 
 cp .env.example .env
 # Edit .env and set ANTHROPIC_API_KEY
+
+# Pre-download the model weights (doctr + TrOCR)
+python scripts/setup_models.py
 ```
+
+`scripts/setup_models.py` works around a known issue where the doctr library hits an HTTP 308 redirect that `urllib` doesn't follow, silently leaving a 0-byte file in `~/.cache/doctr/models/`. Run it once and you're set.
 
 No system-level dependencies required. Tested on macOS (Apple Silicon) and Linux; runs on CPU/MPS without a GPU.
 
