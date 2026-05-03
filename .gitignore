@@ -216,3 +216,20 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# macOS
+.DS_Store
+
+# Project data: ignore raw scans + ground truth + hand-labeled
+# Track: data/samples/ (demo images) and data/parquet_cache/ (committed flagger training data)
+data/raw/
+data/ground_truth/
+data/hand_labeled/
+
+# Local catalogue runs
+/catalogue.csv
+/tmp_catalogue.csv
+
+# HuggingFace cache (in case anyone sets it inside the repo)
+.cache/
+hf_cache/
