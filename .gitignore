@@ -233,3 +233,24 @@ data/hand_labeled/
 # HuggingFace cache (in case anyone sets it inside the repo)
 .cache/
 hf_cache/
+
+# Credential / secret file patterns (defensive — should never appear here,
+# but block them if they do)
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+secrets.json
+secrets.yaml
+secrets.yml
+credentials.json
+credentials.yaml
+service-account*.json
+.aws/
+.gcp/
+gcloud/
+.kube/config
+
+# Local-only IDE secret files
+.vscode/settings.json
