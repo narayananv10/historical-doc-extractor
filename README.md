@@ -38,11 +38,13 @@ pip install -r requirements.txt
 python -m spacy download en_core_web_sm   # use _trf instead if you have ≥16 GB RAM
 
 cp .env.example .env
-# Edit .env and set ANTHROPIC_API_KEY
+# Edit .env: set ANTHROPIC_API_KEY (required) and HF_TOKEN (recommended)
 
 # Pre-download the model weights (doctr + TrOCR)
 python scripts/setup_models.py
 ```
+
+`HF_TOKEN` is technically optional — model downloads work anonymously — but it lifts HuggingFace's rate limits and silences the unauthenticated-requests warning. Create a free read-only token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
 
 `scripts/setup_models.py` works around a known issue where the doctr library hits an HTTP 308 redirect that `urllib` doesn't follow, silently leaving a 0-byte file in `~/.cache/doctr/models/`. Run it once and you're set.
 

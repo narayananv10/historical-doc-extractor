@@ -21,11 +21,19 @@ jobs:
           cache: pip
 
       - name: Install dependencies
+        env:
+          # Authenticated HF access for higher download rate limits.
+          # Required once CI starts pulling model weights.
+          # Set as a GitHub Actions repo secret: Settings -> Secrets and
+          # variables -> Actions -> New repository secret (name: HF_TOKEN).
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Smoke import test
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python -c "
           import src
