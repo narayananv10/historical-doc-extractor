@@ -165,7 +165,7 @@ def main() -> None:
         st.header("Input")
         uploaded = st.file_uploader(
             "Upload a scan",
-            type=["jpg", "jpeg", "png", "tif", "tiff", "webp"],
+            type=["jpg", "jpeg", "png", "tif", "tiff", "webp", "heic", "heif"],
         )
         no_api = st.toggle(
             "Skip Claude API",
