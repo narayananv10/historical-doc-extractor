@@ -6,20 +6,25 @@ features, TrOCR/post-correction agreement features, the ground truth, and the
 binary label `is_still_wrong = (CER(corrected, gt) > 0)`.
 
 Strategy:
-  - Use the GW dataset's pre-segmented line images for TrOCR (one call/line).
+  - Use the FKI dataset's pre-segmented line images for TrOCR (one call/line).
     This guarantees 1:1 alignment with the dataset's line-level ground truth.
-  - Use the page image for the Claude vision post-correction call (one
-    call/page). The model sees the same visual context a real production run
-    would see.
+  - Use the original LoC page scan for the Claude vision post-correction call
+    (one call/page). FKI's release ships line images only; the original page
+    scans live at the Library of Congress (download via scripts/download_gw_pages.py).
+    Sending the real scan keeps the training-time and production-time inputs
+    in the same distribution.
   - Idempotent: skips pages whose rows are already in the output parquet.
 
-Dataset layout assumed (adjust _discover_gw if your extraction differs):
-    {root}/data/line_images_normalized/{line_id}.png
-    {root}/data/pages/{page_id}.png   (or pages_normalized, page_images)
-    {root}/ground_truth/transcription.txt   ("line_id word|word|word ...")
+Dataset layout assumed:
+    {root}/data/line_images_normalized/{line_id}.png   (FKI release)
+    {root}/ground_truth/transcription.txt              (FKI release)
+    {loc_pages}/{page_id}.jpg                          (LoC, downloaded separately)
 
 Run:
-    python scripts/cache_iam_gw.py --root data/raw/iam_gw/washingtondb-v1.0
+    # First, get the LoC page scans (one-shot, ~5 MB):
+    python scripts/download_gw_pages.py
+    # Then cache the pipeline run (~$0.10, ~5 min):
+    python scripts/cache_iam_gw.py
     python scripts/cache_iam_gw.py --dry-run        # just discover & print
     python scripts/cache_iam_gw.py --limit 2        # process first 2 pages
 """
@@ -46,6 +51,7 @@ from src.ocr_trocr import Line, transcribe_one
 from src.postcorrect import post_correct
 
 DEFAULT_GW_ROOT = Path("data/raw/iam_gw/washingtondb-v1.0")
+DEFAULT_LOC_PAGES = Path("data/raw/iam_gw/loc_pages")
 DEFAULT_OUTPUT = Path("data/parquet_cache/iam_gw_pipeline.parquet")
 
 # GW transcriptions encode special characters as "s_xx" tokens. This map covers
@@ -59,11 +65,10 @@ GW_SPECIAL_CHARS = {
     "s_excl": "!", "s_s": "s",
 }
 
-# Candidate page-image directories (different versions of the GW release name
+# Candidate line-image directories (different versions of the GW release name
 # this differently). First hit wins.
-PAGE_DIR_CANDIDATES = ["pages", "page_images", "page_images_normalized"]
 LINE_DIR_CANDIDATES = ["line_images_normalized", "lines", "line_images"]
-PAGE_EXT_CANDIDATES = [".png", ".jpg", ".jpeg", ".tif", ".tiff"]
+PAGE_EXT_CANDIDATES = [".jpg", ".jpeg", ".png", ".tif", ".tiff"]
 
 
 @dataclass
@@ -112,7 +117,7 @@ def _resolve_image(directory: Path, stem: str) -> Path | None:
     return None
 
 
-def _discover_gw(root: Path) -> list[GWDoc]:
+def _discover_gw(root: Path, loc_pages: Path) -> list[GWDoc]:
     transcription = root / "ground_truth" / "transcription.txt"
     if not transcription.exists():
         sys.exit(
@@ -121,17 +126,20 @@ def _discover_gw(root: Path) -> list[GWDoc]:
             f"DEFAULT_GW_ROOT in this file."
         )
 
-    page_dir = _resolve_dir(root, PAGE_DIR_CANDIDATES)
     line_dir = _resolve_dir(root, LINE_DIR_CANDIDATES)
-    if page_dir is None:
-        sys.exit(f"No page-image directory found under {root / 'data'} "
-                 f"(tried: {PAGE_DIR_CANDIDATES})")
     if line_dir is None:
         sys.exit(f"No line-image directory found under {root / 'data'} "
                  f"(tried: {LINE_DIR_CANDIDATES})")
 
-    print(f"[discover] page images: {page_dir}", file=sys.stderr)
+    if not loc_pages.is_dir():
+        sys.exit(
+            f"LoC page directory not found: {loc_pages}\n"
+            f"Run `python scripts/download_gw_pages.py` first to fetch the "
+            f"original page scans from loc.gov."
+        )
+
     print(f"[discover] line images: {line_dir}", file=sys.stderr)
+    print(f"[discover] page scans: {loc_pages}", file=sys.stderr)
 
     gt = _parse_transcription(transcription)
     print(f"[discover] {len(gt)} ground-truth lines", file=sys.stderr)
@@ -143,9 +151,10 @@ def _discover_gw(root: Path) -> list[GWDoc]:
 
     docs: list[GWDoc] = []
     for page_id in sorted(pages.keys()):
-        page_image = _resolve_image(page_dir, page_id)
+        page_image = _resolve_image(loc_pages, page_id)
         if page_image is None:
-            print(f"[skip page {page_id}] no image found", file=sys.stderr)
+            print(f"[skip page {page_id}] no LoC scan in {loc_pages} "
+                  f"(run download_gw_pages.py)", file=sys.stderr)
             continue
         lines = sorted(pages[page_id], key=lambda t: t[0])
         line_paths: list[tuple[str, Path, str]] = []
@@ -246,7 +255,10 @@ def _existing_doc_ids(parquet_path: Path) -> set[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=DEFAULT_GW_ROOT,
-                        help="Path to extracted GW dataset")
+                        help="Path to extracted FKI GW dataset")
+    parser.add_argument("--loc-pages", type=Path, default=DEFAULT_LOC_PAGES,
+                        help="Directory of LoC page scans (one JPG per page id; "
+                             "produced by scripts/download_gw_pages.py)")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT,
                         help="Parquet path to write")
     parser.add_argument("--no-api", action="store_true",
@@ -258,7 +270,7 @@ def main() -> int:
                         help="Discover the dataset and exit without running the pipeline")
     args = parser.parse_args()
 
-    docs = _discover_gw(args.root)
+    docs = _discover_gw(args.root, args.loc_pages)
     if args.dry_run:
         for doc in docs[: (args.limit or len(docs))]:
             print(f"  {doc.page_id}: {len(doc.lines)} lines, "
