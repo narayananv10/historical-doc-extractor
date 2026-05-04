@@ -164,7 +164,8 @@ This is the project's headline contribution. The flagger predicts whether a line
 ### 8. Batch — `src/batch.py`
 - CLI: `python -m src.batch data/raw/loc/ -o catalogue.csv`.
 - Sequential processing for a 30–50 doc demo set (post-correction's per-doc Claude call dominates; multiprocessing isn't worth the PyTorch fork hazards).
-- Output columns: `filename, doc_type, doc_type_confidence, mean_prob_wrong, n_review_lines, persons, dates, places, signed_date, amount`.
+- Output columns: `filename, doc_type, doc_type_confidence, n_lines, n_review_lines, mean_prob_wrong, sender, recipient, signed_date, amount, persons, dates, places` — `sender`/`recipient` come from Claude's doc-type-aware extractor (letter-typed docs); `persons`/`dates`/`places` are the union of spaCy + Claude entities, semicolon-joined.
+- Idempotent: incremental writes after each doc, resume on re-run if the output CSV already exists.
 - Screenshot the resulting CSV for the README.
 
 ### 9. Evaluation — `scripts/evaluate.py` + notebooks
