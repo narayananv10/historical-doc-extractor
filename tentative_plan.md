@@ -2,7 +2,7 @@
 
 ## Context
 
-A portfolio project demonstrating end-to-end ingestion of historical handwritten archives into structured, human-reviewable output. The same pipeline shape applies to any document a newsroom or research org needs to digest at speed: archived correspondence, leaked documents, court filings, scanned press releases.
+An end-to-end pipeline for ingesting historical handwritten archives into structured, human-reviewable output. The same pipeline shape applies to any document a newsroom or research org needs to digest at speed: archived correspondence, leaked documents, court filings, scanned press releases.
 
 The pipeline does four things end to end:
 1. **OCR** the handwriting (TrOCR with per-token logprob signals).
@@ -65,7 +65,7 @@ full_text ──┬──► [classify_claude]   → doc_type
 ```
 historical-doc-extractor/
 ├── README.md                  # narrative, install, how to run, CER/WER + flagger results
-├── WRITEUP.md                 # narrative deep-dive: framing, flagger model, calibration, limits
+├── docs/                      # demo GIF + supplemental notes (longer-form writeup is published externally)
 ├── requirements.txt
 ├── .env.example               # ANTHROPIC_API_KEY
 ├── data/
@@ -207,7 +207,7 @@ Each phase has its own verification. The learned-flagger notebook (phase 6) is t
 9. **Batch** — `batch.py` → `catalogue.csv` on the LoC set.
 10. **UI** — `app.py` Streamlit with the four tabs.
 11. **Error analysis** — `notebooks/errors.ipynb`: char-level confusion + cherry-picked failures.
-12. **Writeup + polish** — `WRITEUP.md`, README (architecture diagram, screenshots, install steps incl. `python -m spacy download en_core_web_sm`), short demo GIF.
+12. **Writeup + polish** — README polish (Mermaid architecture diagram, notebook cross-references, install steps incl. `python -m spacy download en_core_web_sm`), `docs/demo.gif` placeholder + capture instructions. Long-form narrative writeup published externally (linked from the README once available).
 
 ## Verification
 
@@ -240,9 +240,9 @@ TrOCR runs locally — free at inference time. Claude API is used for three thin
 - **Embedding search** over `catalogue.csv` (`sentence-transformers`) so the catalogue can be queried semantically; expose as a 5th Streamlit tab.
 - Per-class confusion matrix from the hand-labeled subset.
 
-## Productionization sketch (for WRITEUP.md)
+## Productionization sketch
 
-Brief notes on how this would deploy beyond the laptop demo — useful for the writeup but not built:
+Brief notes on how this would deploy beyond the laptop demo — useful for the external writeup but not built:
 
 - **Storage**: raw scans in S3 (or any object store), keyed by document ID; structured output (the `catalogue.csv` schema) in a queryable store (DynamoDB or Postgres). Per-line probabilities and reasons live alongside the corrected text so any consumer can decide whether to trust a record.
 - **Worker pool**: TrOCR inference and the per-document Claude vision call are independent per document — embarrassingly parallel. Run as a Lambda or a small autoscaling worker pool reading from a queue (SQS / Pub/Sub).

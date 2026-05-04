@@ -4,7 +4,27 @@ End-to-end ingestion of historical handwritten archives into structured, human-r
 
 The same pipeline shape generalizes to anything a fast-moving organization needs to digest reliably from images: archived correspondence, leaked documents, court filings, scanned press releases.
 
-## What the pipeline does
+<!-- TODO: link to the longer-form Substack write-up here once published -->
+
+![Streamlit demo](docs/demo.gif)
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A[scan.jpg] --> B[preprocess<br/>deskew + line-segment]
+    B --> C[TrOCR<br/>+ per-token logprobs]
+    C --> D[Claude vision<br/>post-correction]
+    C -. agreement signal .-> E[learned flagger<br/>P wrong + reason codes]
+    D --> E
+    D --> F[classify<br/>letter/receipt/ledger/deed]
+    F --> G[NER<br/>spaCy baseline + Claude custom fields]
+    E --> H[Streamlit Review queue]
+    G --> I[catalogue.csv / JSON]
+    I --> H
+```
+
+Pipeline as text, in case Mermaid doesn't render:
 
 ```
 scan.jpg
@@ -88,7 +108,7 @@ prompts/v1/  versioned Claude system prompts
 models/      flagger_v1.pkl (trained sklearn classifier)
 data/        samples/ (checked in), parquet_cache/ (committed flagger data)
 app.py       Streamlit demo
-WRITEUP.md   narrative deep-dive: framing, eval methodology, calibration, limits
+docs/        demo GIF + supplemental notes
 ```
 
 See [tentative_plan.md](tentative_plan.md) for the full architecture and design rationale.
@@ -97,7 +117,16 @@ See [tentative_plan.md](tentative_plan.md) for the full architecture and design 
 
 This project takes a *fail-loudly* posture: every line that gets emitted carries a probability of error and, when flagged, a human-readable explanation. Specifically:
 
-- **Accuracy:** published CER/WER on a public benchmark and a hand-labeled holdout; flagger evaluated with ROC, Brier, reliability diagram.
-- **Transparency:** flagger feature importances are published; entities tagged by source (`spacy` vs `claude`); Claude prompts versioned in `prompts/v1/`.
+- **Accuracy:** published CER on the IAM-GW public benchmark; flagger evaluated with ROC, Brier, and a reliability diagram in [`notebooks/calibration.ipynb`](notebooks/calibration.ipynb). Out-of-distribution validation against a hand-labeled LoC holdout is **not yet built** and is documented as a real limitation in the calibration notebook.
+- **Transparency:** flagger feature importances are published in [`notebooks/flagger.ipynb`](notebooks/flagger.ipynb); entities tagged by source (`spacy` vs `claude`); Claude prompts versioned under [`prompts/v1/`](prompts/v1/).
 - **Human oversight:** the Review queue tab surfaces every flagged line with its crop, both the raw and corrected text, the probability, and the reasons.
 - **Accountability:** per-line probability and reasons are persisted to `catalogue.csv` so every downstream record can be audited.
+- **Honest fallbacks:** under `--no-api`, every line is force-flagged with a `NO_API_VERIFICATION` reason rather than silently producing unverified TrOCR output. The Streamlit Transcription tab also switches to a warning caption in that mode.
+
+## Notebooks
+
+| Notebook | What's in it |
+|---|---|
+| [`flagger.ipynb`](notebooks/flagger.ipynb) | Feature engineering, GroupKFold training, ROC + AUC + Brier, feature importance plot, model bundle save |
+| [`calibration.ipynb`](notebooks/calibration.ipynb) | Reliability diagram, reviewer-budget framing, threshold selection, OOD limitation |
+| [`errors.ipynb`](notebooks/errors.ipynb) | Char-level confusion (substitutions / deletions / insertions), three cherry-picked failure cases with the actual handwriting images, four concrete v2 directions |
