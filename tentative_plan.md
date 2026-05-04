@@ -127,7 +127,7 @@ historical-doc-extractor/
 ### 4. Classification — `src/classify.py`
 - Single Claude API call (model: `claude-haiku-4-5-20251001` for cost) using **tool use** with a structured schema: `{"doc_type": "letter|receipt|ledger|deed", "confidence": float, "reasoning": str}`.
 - Input: full transcribed text (truncate at ~4k tokens). Cache the system prompt with `cache_control` since it's reused per document.
-- Backup: `facebook/bart-large-mnli` zero-shot pipeline. Activated by `--no-api` flag for offline reproducibility.
+- Under `--no-api`: returns `doc_type="unknown"` with a note. The original plan called for a `facebook/bart-large-mnli` zero-shot fallback; dropped to avoid a 1.6 GB extra HF download for a feature that's only useful in offline mode.
 
 ### 5. NER — `src/ner.py`
 - **Baseline**: `spacy` for PERSON / DATE / GPE / ORG. Default to `en_core_web_sm` for portability; `en_core_web_trf` is a drop-in upgrade where memory allows (see Hardware notes). Always run.
@@ -189,9 +189,9 @@ This is the project's headline contribution. The flagger predicts whether a line
 
 ## Build order
 
-Each phase has its own verification. The flagger notebook (phase 5) is the critical path — protect time for it.
+Each phase has its own verification. The learned-flagger notebook (phase 6) is the critical path — protect time for it.
 
-1. **Scaffold** — repo skeleton, `requirements.txt`, `download_loc.py`, pull LoC. Hand-label 8 LoC docs into `data/hand_labeled/`.
+1. **Scaffold** — repo skeleton, `requirements.txt`, `download_loc.py`, pull LoC. (Hand-labelling 8 LoC docs into `data/hand_labeled/` was originally a Phase 1 task; deferred — see Phase 7 limitations note. Without the holdout, calibration is in-distribution only.)
 2. **OCR + cache** — `preprocess.py`, `ocr_trocr.py` with per-token logprobs.
 3. **Post-correction** — `src/postcorrect.py` + `prompts/v1/postcorrect.md`. End-to-end on one doc: scan → TrOCR → Claude vision corrections → corrected lines.
 4. **Cache training data** — register for IAM-HistDB, extract `washingtondb-v1.0` into `data/raw/iam_gw/`, then `python scripts/download_gw_pages.py` (pulls 20 LoC page scans for the GW pages, ~4 MB), then `python scripts/cache_iam_gw.py` (TrOCR + post-correction over the FKI line images using LoC page scans for visual context) to produce `data/parquet_cache/iam_gw_pipeline.parquet`. **Commit this parquet** so the flagger notebook can iterate without re-running the heavy steps.
@@ -211,7 +211,7 @@ End-to-end checks before declaring done:
 2. `python -m src.batch data/samples/ -o /tmp/catalogue.csv` → CSV has one row per image with non-empty `doc_type` and `persons`.
 3. `python scripts/evaluate.py` prints a CER/WER table comparing TrOCR raw vs TrOCR + post-correction (IAM-GW and LoC holdout) and the flagger's ROC AUC + Brier score.
 4. Deleting `models/flagger_v1.pkl` and re-running the pipeline still produces a populated review queue (rule-based fallback works).
-5. `python -m src.pipeline data/samples/letter1.jpg --no-api` runs offline (skips post-correction; uses BART-MNLI fallback for classify) — proves no hard API dependency.
+5. `python -m src.pipeline data/samples/letter1.jpg --no-api` runs offline (skips post-correction; classify returns `unknown`; spaCy still runs for baseline NER) — proves no hard API dependency.
 6. Repo clones and runs cleanly in a fresh venv on macOS with the README instructions only — no undocumented step.
 
 ## Responsible AI

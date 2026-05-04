@@ -18,14 +18,18 @@ scan.jpg
   → Streamlit review UI
 ```
 
-## Headline result *(populated after evaluation runs)*
+## Headline result
 
-| OCR | CER ↓ (IAM-GW) | CER ↓ (LoC holdout) |
+| OCR | Mean CER ↓ | Perfect-line rate ↑ |
 |---|---|---|
-| TrOCR raw | _TBD_ | _TBD_ |
-| TrOCR + Claude vision post-correction | _TBD_ | _TBD_ |
+| TrOCR raw | 0.239 | 1.7% |
+| TrOCR + Claude vision post-correction | **0.214** | **24.1%** |
 
-**Flagger on residual errors:** ROC AUC _TBD_, Brier _TBD_. At the chosen threshold, flagging _TBD_% of lines catches _TBD_% of remaining errors.
+Mean CER barely moves (~11% relative), but **14× more lines are perfect** after post-correction. The bimodal effect — fixes nearly-right lines, sometimes adds noise to severely-wrong ones — is what the flagger is built to triage.
+
+**Flagger on residual errors** (5-fold GroupKFold CV on IAM-GW, 656 lines / 20 docs): ROC AUC **0.72**, Brier **0.16**. At the deployable threshold (review-budget = 30%), flagging 30% of lines catches **36% of remaining errors at 92% precision**.
+
+> Numbers are in-distribution on the GW benchmark only. A hand-labelled LoC holdout for out-of-distribution validation is documented as a real limitation in `notebooks/calibration.ipynb`.
 
 ## Install
 
