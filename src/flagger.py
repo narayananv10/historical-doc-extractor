@@ -26,6 +26,12 @@ from src.postcorrect import CorrectedLine
 MODEL_PATH = Path(__file__).parent.parent / "models" / "flagger_v1.pkl"
 DEFAULT_THRESHOLD = 0.5
 
+# Lazy-loaded model bundle. Sentinel-vs-None lets us distinguish "not yet
+# attempted" from "attempted and failed", so we don't retry on every flag()
+# call when the file is genuinely missing.
+_SENTINEL = object()
+_MODEL_BUNDLE_CACHE = _SENTINEL
+
 
 @dataclass
 class FlaggerOutput:
@@ -114,32 +120,61 @@ def _flag_rule_based(features: dict, threshold: float) -> FlaggerOutput:
 
 
 def _try_load_model():
-    """Returns the loaded model bundle dict, or None to fall back."""
-    if not MODEL_PATH.exists():
-        return None
-    try:
-        import joblib
+    """Returns the loaded model bundle dict, or None to fall back. Cached
+    after first load — joblib.load is expensive enough to matter when batch
+    runs call flag() per line."""
+    global _MODEL_BUNDLE_CACHE
+    if _MODEL_BUNDLE_CACHE is _SENTINEL:
+        if not MODEL_PATH.exists():
+            _MODEL_BUNDLE_CACHE = None
+        else:
+            try:
+                import joblib
 
-        return joblib.load(MODEL_PATH)
-    except Exception as exc:
-        print(
-            f"[flagger] failed to load {MODEL_PATH}: {exc!r}; "
-            f"falling back to rule-based",
-            file=sys.stderr,
-        )
-        return None
+                _MODEL_BUNDLE_CACHE = joblib.load(MODEL_PATH)
+            except Exception as exc:
+                print(
+                    f"[flagger] failed to load {MODEL_PATH}: {exc!r}; "
+                    f"falling back to rule-based",
+                    file=sys.stderr,
+                )
+                _MODEL_BUNDLE_CACHE = None
+    return _MODEL_BUNDLE_CACHE
+
+
+def _flag_learned(features: dict, bundle: dict, threshold: float) -> FlaggerOutput:
+    """Learned-model path. Probability comes from the trained classifier;
+    reason codes still come from the rule-based path so flagged lines have
+    a human-readable explanation alongside the probability."""
+    feature_names = bundle["feature_names"]
+    model = bundle["model"]
+    scaler = bundle["scaler"]
+
+    x = np.array(
+        [[float(features.get(name, 0.0) or 0.0) for name in feature_names]],
+        dtype=np.float64,
+    )
+    x_scaled = scaler.transform(x)
+    prob = float(model.predict_proba(x_scaled)[0, 1])
+
+    # Reuse the rule-based reasons as descriptive attribution. They explain
+    # which features fired strongly, not why the model predicted what it did.
+    rule_out = _flag_rule_based(features, threshold)
+    return FlaggerOutput(prob_wrong=prob, flagged=bool(prob >= threshold), reasons=rule_out.reasons)
 
 
 def flag(features: dict, *, threshold: float | None = None) -> FlaggerOutput:
-    """Flag a single line. Uses the learned model if available, otherwise
-    rule-based. Reason codes are identical across both paths."""
+    """Flag a single line. Uses the learned model when (a) it's loaded and
+    (b) we have post-correction context (llm_confidence is not None). The
+    learned model was trained on lines that went through Claude vision
+    post-correction; calling it on --no-api features (llm_confidence=None,
+    frac_chars_changed=0) is out of distribution and produces nonsense, so
+    we fall back to rule-based for that case. Reason codes are identical
+    across both paths."""
     bundle = _try_load_model()
-    if bundle is None:
-        # Phase 5: rule-based only. Phase 6 will replace this branch with
-        # a learned-model path that emits the same FlaggerOutput shape.
+    if bundle is None or features.get("llm_confidence") is None:
         return _flag_rule_based(features, threshold or DEFAULT_THRESHOLD)
-    # Learned path wired in Phase 6.
-    return _flag_rule_based(features, threshold or bundle.get("threshold", DEFAULT_THRESHOLD))
+    return _flag_learned(features, bundle, threshold or bundle.get("threshold", DEFAULT_THRESHOLD))
 
 
 def flag_many(
