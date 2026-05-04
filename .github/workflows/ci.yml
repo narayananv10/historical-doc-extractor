@@ -50,5 +50,6 @@ jobs:
           from src.ner import Entity, extract_entities
           from src.batch import CSV_COLUMNS
           import scripts.cache_iam_gw
+          import py_compile; py_compile.compile('app.py', doraise=True)
           print('all imports ok')
           "

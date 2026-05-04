@@ -175,13 +175,14 @@ This is the project's headline contribution. The flagger predicts whether a line
 - **Error analysis** (`notebooks/errors.ipynb`): char-level confusion matrix on the residual errors (post-correction did not fix), 3 cherry-picked failure cases with reason codes.
 
 ### 10. Streamlit demo — `app.py`
-- Sidebar: file uploader, threshold slider (controls the flagger cutoff), toggle to skip post-correction (`--no-api` parity).
+- Sidebar: file uploader, threshold slider (controls the flagger cutoff in real time without re-running the pipeline), toggle to skip Claude API (`--no-api` parity).
+- Top of page: 4-metric summary (lines / flagged-at-threshold / doc_type / entity count).
 - Main area, four tabs:
-  - **Image** — original scan with bbox overlays color-coded by `prob_wrong` (post-correction residual).
-  - **Transcription** — per-line view with three columns: TrOCR raw text | Claude-vision-corrected text | corrections diff (insertions/deletions highlighted). Confidence chip per line.
-  - **Structured** — doc type, entities table, JSON view.
-  - **Review queue** — flagged corrected-lines side-by-side with their crops, each annotated with both the probability and the human-readable reasons.
-- Caches model load via `@st.cache_resource`.
+  - **Image** — original scan with line bounding boxes colour-coded by `prob_wrong` (green → red); flagged boxes are drawn thicker.
+  - **Transcription** — sortable per-line dataframe: line, prob_wrong, flagged, TrOCR raw, Corrected, changed flag, llm_confidence. Inline diff highlighting is a future polish item.
+  - **Structured** — doc type + confidence + reasoning, entity table (label / text / source / confidence), download-as-JSON button.
+  - **Review queue** — one expander per flagged line: line crop, TrOCR raw, Corrected, llm_confidence, and human-readable reason codes.
+- Model caching uses each module's `@lru_cache(maxsize=1)` for TrOCR / spaCy / flagger model — no extra `@st.cache_resource` layer needed.
 
 ## Reused utilities (don't reinvent)
 

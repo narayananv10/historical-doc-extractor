@@ -1,8 +1,228 @@
-"""Streamlit demo.
+"""Streamlit demo: upload a scan, see TrOCR + Claude post-correction +
+flagger + classify + NER all in one page.
 
-Sidebar: file uploader, threshold slider, --no-api toggle.
-Tabs: Image (with bbox overlays) | Transcription (raw vs corrected diff)
-      | Structured (doc type + entities + JSON) | Review queue.
+Run from the repo root:
+    streamlit run app.py
 """
 
-# TODO: implement Streamlit app
+from __future__ import annotations
+
+import json
+import tempfile
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
+from PIL import Image, ImageDraw
+
+from src.flagger import describe
+from src.pipeline import DocumentResult, process
+
+st.set_page_config(
+    page_title="Historical Document Extractor",
+    layout="wide",
+    page_icon="📜",
+)
+
+
+def _bbox_color(prob: float) -> tuple[int, int, int]:
+    """Map prob in [0, 1] to an RGB tuple: green -> yellow -> red."""
+    p = max(0.0, min(1.0, prob))
+    if p < 0.5:
+        return int(p * 2 * 255), 255, 0
+    return 255, int((1 - p) * 2 * 255), 0
+
+
+def _annotate(image_path: Path, lines, threshold: float) -> Image.Image:
+    img = Image.open(image_path).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    for line in lines:
+        x, y, w, h = line.bbox
+        color = _bbox_color(line.prob_wrong)
+        width = 4 if line.prob_wrong >= threshold else 2
+        draw.rectangle([x, y, x + w, y + h], outline=color, width=width)
+    return img
+
+
+def _render_image_tab(result: DocumentResult, image_path: Path, threshold: float):
+    st.subheader("Original scan with line bounding boxes")
+    st.caption(
+        "Box colour: green = low `prob_wrong`, red = high. "
+        "Box width: thicker = flagged at the current threshold."
+    )
+    st.image(_annotate(image_path, result.lines, threshold), use_container_width=True)
+
+
+def _render_transcription_tab(result: DocumentResult, threshold: float):
+    st.subheader(f"{len(result.lines)} lines")
+    df = pd.DataFrame(
+        [
+            {
+                "line": line.line_id,
+                "prob_wrong": round(line.prob_wrong, 3),
+                "flagged": "🚩" if line.prob_wrong >= threshold else "",
+                "TrOCR raw": line.trocr_text,
+                "Corrected": line.corrected_text,
+                "changed": "✓" if line.changed else "",
+                "llm_conf": (
+                    round(line.llm_confidence, 2)
+                    if line.llm_confidence is not None
+                    else None
+                ),
+            }
+            for line in result.lines
+        ]
+    )
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def _render_structured_tab(result: DocumentResult, image_path: Path):
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.metric(
+            "Document type",
+            result.classification.doc_type,
+            f"confidence {result.classification.confidence:.2f}",
+        )
+    with col2:
+        if result.classification.reasoning:
+            st.markdown("**Reasoning**")
+            st.info(result.classification.reasoning)
+
+    st.subheader(f"Entities ({len(result.entities)})")
+    if result.entities:
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "label": e.label,
+                        "text": e.text,
+                        "source": e.source,
+                        "confidence": (
+                            round(e.confidence, 2) if e.confidence is not None else None
+                        ),
+                    }
+                    for e in result.entities
+                ]
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info("No entities extracted.")
+
+    json_str = json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
+    st.download_button(
+        "Download as JSON",
+        json_str,
+        file_name=f"{image_path.stem}.json",
+        mime="application/json",
+    )
+
+
+def _render_review_tab(result: DocumentResult, image_path: Path, threshold: float):
+    flagged = [line for line in result.lines if line.prob_wrong >= threshold]
+    st.subheader(f"{len(flagged)} flagged for review (threshold = {threshold:.2f})")
+
+    if not flagged:
+        st.success("Nothing flagged at this threshold. Lower the threshold to see more.")
+        return
+
+    original = Image.open(image_path).convert("RGB")
+    for line in flagged:
+        with st.expander(
+            f"Line {line.line_id}  —  prob_wrong = {line.prob_wrong:.2f}",
+            expanded=True,
+        ):
+            col_img, col_text = st.columns([1, 2])
+            with col_img:
+                x, y, w, h = line.bbox
+                if w > 0 and h > 0:
+                    crop = original.crop((x, y, x + w, y + h))
+                    st.image(crop, use_container_width=True)
+                else:
+                    st.caption("(no bbox crop)")
+            with col_text:
+                st.markdown(f"**TrOCR raw:** {line.trocr_text}")
+                st.markdown(f"**Corrected:** {line.corrected_text}")
+                if line.llm_confidence is not None:
+                    st.caption(f"LLM confidence: {line.llm_confidence:.2f}")
+                if line.reasons:
+                    st.markdown("**Why flagged:**")
+                    for r in line.reasons:
+                        st.markdown(f"- {describe(r)}")
+
+
+def main() -> None:
+    st.title("📜 Historical Document Extractor")
+    st.caption(
+        "Upload a handwritten or printed scan. Pipeline: preprocess → TrOCR → "
+        "Claude vision post-correction → flagger → classify → NER. "
+        "Confidence-aware review queue with per-line probabilities and reason codes."
+    )
+
+    with st.sidebar:
+        st.header("Input")
+        uploaded = st.file_uploader(
+            "Upload a scan",
+            type=["jpg", "jpeg", "png", "tif", "tiff", "webp"],
+        )
+        no_api = st.toggle(
+            "Skip Claude API",
+            value=False,
+            help=(
+                "Skip post-correction, classification, and Claude entity "
+                "extraction. spaCy NER still runs. The flagger falls back to "
+                "rule-based mode (no learned-model context)."
+            ),
+        )
+        threshold = st.slider(
+            "Flagger threshold",
+            0.0, 1.0, 0.5, 0.01,
+            help="Lines with `prob_wrong` above this are flagged.",
+        )
+        run = st.button("Process", type="primary", disabled=not uploaded)
+
+    if run and uploaded is not None:
+        suffix = Path(uploaded.name).suffix or ".jpg"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(uploaded.read())
+            temp_path = Path(tmp.name)
+        with st.spinner("Running pipeline... (~30-60s; longer on first call due to model load)"):
+            result = process(temp_path, no_api=no_api)
+        st.session_state["result"] = result
+        st.session_state["image_path"] = temp_path
+        st.session_state["filename"] = uploaded.name
+
+    if "result" not in st.session_state:
+        st.info("Upload a scan in the sidebar, then click **Process** to begin.")
+        return
+
+    result: DocumentResult = st.session_state["result"]
+    image_path: Path = st.session_state["image_path"]
+
+    st.markdown(f"**File:** `{st.session_state.get('filename', image_path.name)}`")
+    summary_cols = st.columns(4)
+    summary_cols[0].metric("lines", len(result.lines))
+    summary_cols[1].metric(
+        "flagged @ threshold",
+        sum(1 for line in result.lines if line.prob_wrong >= threshold),
+    )
+    summary_cols[2].metric("doc type", result.classification.doc_type)
+    summary_cols[3].metric("entities", len(result.entities))
+
+    tab_image, tab_transcription, tab_structured, tab_review = st.tabs(
+        ["Image", "Transcription", "Structured", "Review queue"]
+    )
+    with tab_image:
+        _render_image_tab(result, image_path, threshold)
+    with tab_transcription:
+        _render_transcription_tab(result, threshold)
+    with tab_structured:
+        _render_structured_tab(result, image_path)
+    with tab_review:
+        _render_review_tab(result, image_path, threshold)
+
+
+if __name__ == "__main__":
+    main()
