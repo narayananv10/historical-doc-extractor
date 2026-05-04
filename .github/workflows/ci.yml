@@ -48,6 +48,7 @@ jobs:
           from src.postcorrect import CorrectedLine, post_correct
           from src.classify import ClassifyResult, classify
           from src.ner import Entity, extract_entities
+          from src.batch import CSV_COLUMNS
           import scripts.cache_iam_gw
           print('all imports ok')
           "
