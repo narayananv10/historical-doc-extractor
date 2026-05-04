@@ -17,9 +17,9 @@ Outcome: a `git clone && streamlit run app.py` repo, a flagger calibration noteb
 ## Datasets
 
 - **Primary demo set**: Library of Congress *By the People* (crowd.loc.gov) — download ~30–50 images spanning Lincoln Papers (letters), Civil War diaries, Mary Church Terrell papers (letters/diaries), and at least one ledger campaign. Skew toward documents with recognizable structure: letters with named senders/recipients, ledgers with amounts. Volunteer transcriptions ship as ground truth.
-- **Benchmark + flagger training set**: IAM-HistDB **George Washington** subset (20 pages, line-level ground truth) — used to (a) compute CER/WER for both TrOCR raw and TrOCR + Claude vision post-correction, and (b) generate `(line_features, is_correct_after_post_correction)` training pairs for the learned flagger.
+- **Benchmark + flagger training set**: IAM-HistDB **George Washington** subset (20 pages, line-level ground truth) — used to (a) compute CER/WER for both TrOCR raw and TrOCR + Claude vision post-correction, and (b) generate `(line_features, is_correct_after_post_correction)` training pairs for the learned flagger. The FKI release (`washingtondb-v1.0`) ships line images and word images only, no full page scans, so we pull the original page scans from the Library of Congress (Series 2, Letterbook 1) via `scripts/download_gw_pages.py`. FKI page IDs map 1:1 to LoC `sp=N` with no offset (verified against FKI's ground truth header). Pages used: 270-279 and 300-309 (the FKI dataset's two non-contiguous blocks).
 - **Hand-labeled holdout**: 8 LoC documents transcribed manually into `data/hand_labeled/`, used as a held-out set for the flagger calibration analysis (since IAM-GW likely overlaps TrOCR pretraining).
-- All raw files live under `data/raw/{loc,iam_gw}/`; transcriptions under `data/ground_truth/`. `data/` is gitignored except for a `data/samples/` folder with 3–5 small images for the live demo.
+- All raw files live under `data/raw/{loc,iam_gw}/`; transcriptions under `data/ground_truth/`. The IAM-GW tree contains both the FKI distribution (`data/raw/iam_gw/washingtondb-v1.0/`) and the LoC page scans (`data/raw/iam_gw/loc_pages/`). `data/raw/` is gitignored; `data/samples/` (3–5 small images for the live demo) and `data/parquet_cache/` (committed flagger training data from the IAM-GW pipeline run) are tracked.
 
 ## Architecture
 
@@ -92,7 +92,9 @@ historical-doc-extractor/
 │   ├── pipeline.py            # orchestrates the full flow on one image
 │   └── batch.py               # runs pipeline over a folder, writes catalogue.csv
 ├── scripts/
-│   ├── download_loc.py        # fetches LoC sample set
+│   ├── download_loc.py        # fetches LoC sample set (Lincoln, Terrell papers)
+│   ├── download_gw_pages.py   # fetches GW page scans from LoC for the IAM-GW pipeline
+│   ├── setup_models.py        # pre-downloads doctr (curl-based, works around urllib redirect bug) + TrOCR
 │   ├── cache_iam_gw.py        # one-shot: TrOCR + post-correction over IAM-GW → parquet
 │   └── evaluate.py            # CER/WER for TrOCR raw vs post-corrected; flagger ROC/Brier
 ├── app.py                     # Streamlit demo
@@ -136,7 +138,7 @@ historical-doc-extractor/
 
 This is the project's headline contribution. The flagger predicts whether a line is *still* wrong **after** Claude vision post-correction — these are the lines that need a human.
 
-**Training data** (one-shot, via `scripts/cache_iam_gw.py`): run TrOCR + Claude vision post-correction over IAM-GW, align each post-corrected line to ground truth, label `is_still_wrong = (CER(corrected, gt) > 0)`. Cache to `data/parquet_cache/iam_gw_pipeline.parquet` with columns `(line_id, trocr_text, trocr_logprobs, corrected_text, llm_confidence, gt, is_still_wrong)`.
+**Training data** (one-shot, via `scripts/cache_iam_gw.py`): run TrOCR per line image (FKI's pre-segmented line crops, perfect 1:1 alignment with ground truth) and Claude vision post-correction per page (sending the original LoC page scan downloaded by `scripts/download_gw_pages.py`, so training-time inputs match what production sees). Label `is_still_wrong = (CER(corrected, gt) > 0)`. Cache to `data/parquet_cache/iam_gw_pipeline.parquet` with columns `(doc_id, line_id, trocr_text, trocr_token_logprobs, n_tokens, mean_logprob, min_logprob, std_logprob, length_normalized_logprob, corrected_text, llm_confidence, changed, edit_distance_trocr_vs_corrected, n_chars_changed, frac_chars_changed, line_height_px, line_width_px, gt, gt_cer, is_still_wrong)`.
 
 **Features** (per line, computed in `src/flagger.py`):
 - *TrOCR confidence signals*: `mean_logprob`, `min_logprob`, `std_logprob`, `length_normalized_logprob`, `n_tokens`
@@ -189,10 +191,10 @@ This is the project's headline contribution. The flagger predicts whether a line
 
 Each phase has its own verification. The flagger notebook (phase 5) is the critical path — protect time for it.
 
-1. **Scaffold** — repo skeleton, `requirements.txt`, `download_loc.py`, pull LoC + IAM-GW. Hand-label 8 LoC docs into `data/hand_labeled/`.
+1. **Scaffold** — repo skeleton, `requirements.txt`, `download_loc.py`, pull LoC. Hand-label 8 LoC docs into `data/hand_labeled/`.
 2. **OCR + cache** — `preprocess.py`, `ocr_trocr.py` with per-token logprobs.
 3. **Post-correction** — `src/postcorrect.py` + `prompts/v1/postcorrect.md`. End-to-end on one doc: scan → TrOCR → Claude vision corrections → corrected lines.
-4. **Cache training data** — run `scripts/cache_iam_gw.py` (TrOCR + post-correction over IAM-GW) to produce `data/parquet_cache/iam_gw_pipeline.parquet`. **Commit this parquet** so the flagger notebook can iterate without re-running the heavy steps.
+4. **Cache training data** — register for IAM-HistDB, extract `washingtondb-v1.0` into `data/raw/iam_gw/`, then `python scripts/download_gw_pages.py` (pulls 20 LoC page scans for the GW pages, ~4 MB), then `python scripts/cache_iam_gw.py` (TrOCR + post-correction over the FKI line images using LoC page scans for visual context) to produce `data/parquet_cache/iam_gw_pipeline.parquet`. **Commit this parquet** so the flagger notebook can iterate without re-running the heavy steps.
 5. **Pipeline (rule-based flagger)** — `pipeline.py` end-to-end on one doc with the rule-based fallback flagger; produces JSON. Confirms the surface works before the learned model exists.
 6. **Learned flagger (headline)** — `notebooks/flagger.ipynb`: feature engineering, train logistic regression, ROC + Brier + feature importance. Persist to `models/flagger_v1.pkl`. Wire into `src/flagger.py`.
 7. **Calibration** — `notebooks/calibration.ipynb`: reliability diagram + threshold-via-F1 + precision/recall on the LoC holdout.
@@ -248,5 +250,5 @@ Brief notes on how this would deploy beyond the laptop demo — useful for the w
 - **TrOCR variant**: use `microsoft/trocr-base-handwritten` (~330M params), not `-large`. On Apple Silicon (MPS), base does ~1 sec/line vs large's ~5–8 sec/line; the full IAM-GW pass takes ~5 min vs ~30+ min. CER will be a few points worse than large but the flagger story is about *which* errors happen, not absolute accuracy.
 - **spaCy model**: default to `en_core_web_sm` (15MB) rather than `en_core_web_trf` (500MB) on machines with ≤8GB RAM — TrOCR + spaCy-trf + Streamlit + browser will swap heavily. On 16GB+ machines, `_trf` is fine and gives meaningfully better NER.
 - **No GPU required.** All training (the sklearn flagger) and inference (TrOCR-base) run comfortably on CPU/MPS. No fine-tuning in the core scope.
-- **One-time IAM-GW cache**: the heaviest single operation. Run `scripts/cache_iam_gw.py` once; commit the resulting parquet so the flagger notebook can be developed/iterated without re-running TrOCR.
+- **One-time IAM-GW cache**: the heaviest single operation. Run `scripts/download_gw_pages.py` once (~30 seconds, ~4 MB from LoC), then `scripts/cache_iam_gw.py` once (~5–10 min, ~$0.10 in Claude API). Commit the resulting parquet so the flagger notebook can be developed/iterated without re-running TrOCR or the API.
 - **Disk**: ~3 GB total (HuggingFace model cache dominates).
