@@ -1,9 +1,7 @@
 """End-to-end pipeline for one document.
 
-preprocess -> ocr_trocr -> postcorrect -> flagger -> DocumentResult.
-
-Phase 5 deliberately skips classify and ner; those land in Phase 8 and slot
-into DocumentResult without breaking this surface.
+preprocess -> ocr_trocr -> postcorrect -> flagger -> classify -> ner
+-> DocumentResult.
 
 CLI:
     python -m src.pipeline data/samples/letter1.jpg
@@ -16,10 +14,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.classify import ClassifyResult, classify
 from src.flagger import compute_features, describe, flag
+from src.ner import Entity, extract_entities
 from src.ocr_trocr import transcribe
 from src.postcorrect import post_correct
 from src.preprocess import preprocess
@@ -56,6 +56,8 @@ class PipelineLine:
 class DocumentResult:
     image_path: Path
     lines: list[PipelineLine]
+    classification: ClassifyResult
+    entities: list[Entity] = field(default_factory=list)
 
     @property
     def n_review_lines(self) -> int:
@@ -77,6 +79,10 @@ class DocumentResult:
             "n_lines": len(self.lines),
             "n_review_lines": self.n_review_lines,
             "mean_prob_wrong": round(self.mean_prob_wrong, 3),
+            "doc_type": self.classification.doc_type,
+            "doc_type_confidence": round(self.classification.confidence, 3),
+            "doc_type_reasoning": self.classification.reasoning,
+            "entities": [e.to_dict() for e in self.entities],
             "lines": [line.to_dict() for line in self.lines],
         }
 
@@ -105,7 +111,18 @@ def process(image_path: str | Path, *, no_api: bool = False) -> DocumentResult:
             )
         )
 
-    return DocumentResult(image_path=image_path, lines=pipeline_lines)
+    full_text = "\n".join(line.corrected_text for line in pipeline_lines)
+    classification = classify(full_text, no_api=no_api)
+    entities = extract_entities(
+        full_text, doc_type=classification.doc_type, no_api=no_api
+    )
+
+    return DocumentResult(
+        image_path=image_path,
+        lines=pipeline_lines,
+        classification=classification,
+        entities=entities,
+    )
 
 
 def main() -> int:
@@ -133,10 +150,22 @@ def main() -> int:
     else:
         print(f"=== {args.image_path} ===")
         print(
+            f"doc_type: {result.classification.doc_type} "
+            f"(confidence {result.classification.confidence:.2f})"
+        )
+        if result.classification.reasoning:
+            print(f"  why: {result.classification.reasoning}")
+        print(
             f"{len(result.lines)} lines | "
             f"{result.n_review_lines} flagged for review | "
             f"mean prob_wrong = {result.mean_prob_wrong:.3f}"
         )
+        if result.entities:
+            print()
+            print(f"entities ({len(result.entities)}):")
+            for e in result.entities:
+                conf = f" [{e.confidence:.2f}]" if e.confidence is not None else ""
+                print(f"  {e.label:<20} {e.text!r}  (source: {e.source}{conf})")
         print()
         for line in result.lines:
             marker = "!!" if line.flagged else "  "
