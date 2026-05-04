@@ -58,6 +58,7 @@ class DocumentResult:
     lines: list[PipelineLine]
     classification: ClassifyResult
     entities: list[Entity] = field(default_factory=list)
+    no_api: bool = False  # True if the result was produced under --no-api
 
     @property
     def n_review_lines(self) -> int:
@@ -76,6 +77,7 @@ class DocumentResult:
     def to_dict(self) -> dict:
         return {
             "image_path": str(self.image_path),
+            "no_api": self.no_api,
             "n_lines": len(self.lines),
             "n_review_lines": self.n_review_lines,
             "mean_prob_wrong": round(self.mean_prob_wrong, 3),
@@ -111,6 +113,16 @@ def process(image_path: str | Path, *, no_api: bool = False) -> DocumentResult:
             )
         )
 
+    if no_api:
+        # Without Claude post-correction, the transcription is unverified raw
+        # TrOCR output. Force-flag every line so the review surface communicates
+        # that nothing here has had a second-opinion check.
+        for line in pipeline_lines:
+            line.flagged = True
+            line.prob_wrong = 1.0
+            if "NO_API_VERIFICATION" not in line.reasons:
+                line.reasons = ["NO_API_VERIFICATION", *line.reasons]
+
     full_text = "\n".join(line.corrected_text for line in pipeline_lines)
     classification = classify(full_text, no_api=no_api)
     entities = extract_entities(
@@ -122,6 +134,7 @@ def process(image_path: str | Path, *, no_api: bool = False) -> DocumentResult:
         lines=pipeline_lines,
         classification=classification,
         entities=entities,
+        no_api=no_api,
     )
 
 

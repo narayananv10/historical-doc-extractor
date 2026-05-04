@@ -46,6 +46,7 @@ REASON_DESCRIPTIONS: dict[str, str] = {
     "HIGH_CORRECTION_DELTA": "Claude vision changed many characters relative to the TrOCR output.",
     "LOW_LLM_CONFIDENCE": "Claude reported low confidence in the corrected text.",
     "VERY_SHORT_LINE": "Very short line; the OCR had little context to work with.",
+    "NO_API_VERIFICATION": "Claude post-correction was skipped (--no-api mode); the transcription is raw TrOCR output and has not been verified by a second model.",
 }
 
 
