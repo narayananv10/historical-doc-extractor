@@ -25,7 +25,7 @@ scan.jpg
 | TrOCR raw | 0.239 | 1.7% |
 | TrOCR + Claude vision post-correction | **0.214** | **24.1%** |
 
-Mean CER barely moves (~11% relative), but **14× more lines are perfect** after post-correction. The bimodal effect — fixes nearly-right lines, sometimes adds noise to severely-wrong ones — is what the flagger is built to triage.
+Mean CER barely moves (~11% relative), but **14× more lines are perfect** after post-correction. The bimodal effect fixes nearly-right lines, sometimes adds noise to severely-wrong ones, is what the flagger is built to triage.
 
 **Flagger on residual errors** (5-fold GroupKFold CV on IAM-GW, 656 lines / 20 docs): ROC AUC **0.72**, Brier **0.16**. At the deployable threshold (review-budget = 30%), flagging 30% of lines catches **36% of remaining errors at 92% precision**.
 
@@ -48,7 +48,7 @@ cp .env.example .env
 python scripts/setup_models.py
 ```
 
-`HF_TOKEN` is technically optional — model downloads work anonymously — but it lifts HuggingFace's rate limits and silences the unauthenticated-requests warning. Create a free read-only token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
+`HF_TOKEN` is technically optional. The model downloads work anonymously, but it lifts HuggingFace's rate limits and silences the unauthenticated-requests warning. Create a free read-only token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
 
 `scripts/setup_models.py` works around a known issue where the doctr library hits an HTTP 308 redirect that `urllib` doesn't follow, silently leaving a 0-byte file in `~/.cache/doctr/models/`. Run it once and you're set.
 
@@ -97,7 +97,7 @@ See [tentative_plan.md](tentative_plan.md) for the full architecture and design 
 
 This project takes a *fail-loudly* posture: every line that gets emitted carries a probability of error and, when flagged, a human-readable explanation. Specifically:
 
-- **Accuracy** — published CER/WER on a public benchmark and a hand-labeled holdout; flagger evaluated with ROC, Brier, reliability diagram.
-- **Transparency** — flagger feature importances are published; entities tagged by source (`spacy` vs `claude`); Claude prompts versioned in `prompts/v1/`.
-- **Human oversight** — the Review queue tab surfaces every flagged line with its crop, both the raw and corrected text, the probability, and the reasons.
-- **Accountability** — per-line probability and reasons are persisted to `catalogue.csv` so every downstream record can be audited.
+- **Accuracy:** published CER/WER on a public benchmark and a hand-labeled holdout; flagger evaluated with ROC, Brier, reliability diagram.
+- **Transparency:** flagger feature importances are published; entities tagged by source (`spacy` vs `claude`); Claude prompts versioned in `prompts/v1/`.
+- **Human oversight:** the Review queue tab surfaces every flagged line with its crop, both the raw and corrected text, the probability, and the reasons.
+- **Accountability:** per-line probability and reasons are persisted to `catalogue.csv` so every downstream record can be audited.
