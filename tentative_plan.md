@@ -175,14 +175,17 @@ This is the project's headline contribution. The flagger predicts whether a line
 - **Error analysis** (`notebooks/errors.ipynb`): char-level confusion matrix on the residual errors (post-correction did not fix), 3 cherry-picked failure cases with reason codes.
 
 ### 10. Streamlit demo — `app.py`
-- Sidebar: file uploader, threshold slider (controls the flagger cutoff in real time without re-running the pipeline), toggle to skip Claude API (`--no-api` parity).
+- Sidebar: file uploader (jpg/jpeg/png/tif/tiff/webp/heic/heif — HEIC handled via pillow-heif and re-encoded to JPEG before any API call), threshold slider (controls the flagger cutoff in real time without re-running the pipeline), toggle to skip Claude API (`--no-api` parity).
 - Top of page: 4-metric summary (lines / flagged-at-threshold / doc_type / entity count).
-- Main area, four tabs:
+- Main area, **five tabs**:
   - **Image** — original scan with line bounding boxes colour-coded by `prob_wrong` (green → red); flagged boxes are drawn thicker.
-  - **Transcription** — sortable per-line dataframe: line, prob_wrong, flagged, TrOCR raw, Corrected, changed flag, llm_confidence. Inline diff highlighting is a future polish item.
+  - **Transcription** — full corrected transcript as a readable paragraph at the top (with `.txt` download button), divider, then a sortable per-line dataframe: line, prob_wrong, flagged, TrOCR raw, Corrected, changed flag, llm_confidence. Caption above the paragraph is conditional: under `--no-api` it warns the text is unverified TrOCR raw output. Inline word-level diff highlighting is a future polish item.
   - **Structured** — doc type + confidence + reasoning, entity table (label / text / source / confidence), download-as-JSON button.
+  - **Summary** — 1-3 sentence template-composed narrative (doc type + sender/recipient/date if present + line counts), key-fields metric grid (sender / recipient / signed_date / amount), other-named-entities list, pipeline-quality strip (lines / flagged@threshold / mean prob_wrong), and a top-5 breakdown of which reason codes fired on flagged lines.
   - **Review queue** — one expander per flagged line: line crop, TrOCR raw, Corrected, llm_confidence, and human-readable reason codes.
 - Model caching uses each module's `@lru_cache(maxsize=1)` for TrOCR / spaCy / flagger model — no extra `@st.cache_resource` layer needed.
+
+**`--no-api` semantics (pipeline-level, not just UI):** when post-correction is skipped, every line is force-flagged with `prob_wrong = 1.0` and a `NO_API_VERIFICATION` reason code. Rationale: without Claude as a second-opinion validator, the transcription is unverified TrOCR raw output and shouldn't be treated as trusted. This applies equally to `python -m src.pipeline ... --no-api`, `python -m src.batch ... --no-api`, and the Streamlit toggle. The Streamlit Transcription tab caption changes to an explicit warning so the user knows what they're looking at.
 
 ## Reused utilities (don't reinvent)
 

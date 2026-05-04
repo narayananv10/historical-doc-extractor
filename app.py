@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import json
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw
 
+from src.batch import _entities_by_label, _first_entity
 from src.flagger import describe
 from src.pipeline import DocumentResult, process
 
@@ -53,8 +55,27 @@ def _render_image_tab(result: DocumentResult, image_path: Path, threshold: float
     st.image(_annotate(image_path, result.lines, threshold), use_container_width=True)
 
 
-def _render_transcription_tab(result: DocumentResult, threshold: float):
-    st.subheader(f"{len(result.lines)} lines")
+def _render_transcription_tab(
+    result: DocumentResult, image_path: Path, threshold: float
+):
+    if result.no_api:
+        st.warning(
+            "⚠ TrOCR raw output (Claude post-correction skipped — every line "
+            "auto-flagged for review below)"
+        )
+    else:
+        st.caption("Corrected transcript — TrOCR + Claude vision post-correction")
+    st.markdown(result.full_text)
+    st.download_button(
+        "Download transcript (.txt)",
+        result.full_text,
+        file_name=f"{image_path.stem}.txt",
+        mime="text/plain",
+    )
+
+    st.divider()
+
+    st.subheader(f"Per-line breakdown ({len(result.lines)} lines)")
     df = pd.DataFrame(
         [
             {
@@ -120,6 +141,92 @@ def _render_structured_tab(result: DocumentResult, image_path: Path):
     )
 
 
+def _summary_narrative(result: DocumentResult, threshold: float) -> str:
+    """Compose a 1-3 sentence prose summary of the pipeline run."""
+    n = len(result.lines)
+    n_flagged = sum(1 for line in result.lines if line.prob_wrong >= threshold)
+    pct = (n_flagged / n) if n else 0.0
+
+    if result.no_api:
+        return (
+            f"Document type was not classified (`--no-api` mode). "
+            f"Pipeline transcribed {n} lines; **all {n} flagged for human review** "
+            f"because Claude post-correction was skipped — the transcription is "
+            f"unverified TrOCR output."
+        )
+
+    parts: list[str] = [
+        f"This document was classified as a **{result.classification.doc_type}** "
+        f"(confidence {result.classification.confidence:.0%})."
+    ]
+    sender = _first_entity(result.entities, {"SENDER"})
+    recipient = _first_entity(result.entities, {"RECIPIENT"})
+    if sender or recipient:
+        parts.append(
+            f"Sender: {sender or '—'}. Recipient: {recipient or '—'}."
+        )
+    signed_date = _first_entity(result.entities, {"SIGNED_DATE"})
+    if signed_date:
+        parts.append(f"Dated {signed_date}.")
+    parts.append(
+        f"Pipeline transcribed {n} lines, of which {n_flagged} ({pct:.0%}) "
+        f"need human review at the current threshold."
+    )
+    return " ".join(parts)
+
+
+def _render_summary_tab(result: DocumentResult, threshold: float):
+    st.markdown(_summary_narrative(result, threshold))
+
+    st.divider()
+
+    st.subheader("Key fields")
+    cols = st.columns(2)
+    cols[0].metric("Sender", _first_entity(result.entities, {"SENDER"}) or "—")
+    cols[0].metric(
+        "Signed date",
+        _first_entity(result.entities, {"SIGNED_DATE"}) or "—",
+    )
+    cols[1].metric(
+        "Recipient", _first_entity(result.entities, {"RECIPIENT"}) or "—"
+    )
+    cols[1].metric("Amount", _first_entity(result.entities, {"AMOUNT"}) or "—")
+
+    persons = _entities_by_label(
+        result.entities, {"PERSON", "REFERENCED_PERSON"}
+    )
+    places = _entities_by_label(
+        result.entities, {"GPE", "LOC", "REFERENCED_PLACE"}
+    )
+    if persons or places:
+        st.markdown("**Other named entities**")
+        if persons:
+            st.markdown(f"- People: {', '.join(persons)}")
+        if places:
+            st.markdown(f"- Places: {', '.join(places)}")
+
+    st.divider()
+
+    st.subheader("Pipeline quality")
+    qcols = st.columns(3)
+    qcols[0].metric("Lines", len(result.lines))
+    qcols[1].metric(
+        "Flagged @ threshold",
+        sum(1 for line in result.lines if line.prob_wrong >= threshold),
+    )
+    qcols[2].metric("Mean prob_wrong", f"{result.mean_prob_wrong:.2f}")
+
+    reason_counts: Counter[str] = Counter()
+    for line in result.lines:
+        if line.prob_wrong >= threshold:
+            for r in line.reasons:
+                reason_counts[r] += 1
+    if reason_counts:
+        st.subheader("Why lines were flagged")
+        for reason, count in reason_counts.most_common(5):
+            st.markdown(f"- **{count}×** {describe(reason)}")
+
+
 def _render_review_tab(result: DocumentResult, image_path: Path, threshold: float):
     flagged = [line for line in result.lines if line.prob_wrong >= threshold]
     st.subheader(f"{len(flagged)} flagged for review (threshold = {threshold:.2f})")
@@ -165,7 +272,7 @@ def main() -> None:
         st.header("Input")
         uploaded = st.file_uploader(
             "Upload a scan",
-            type=["jpg", "jpeg", "png", "tif", "tiff", "webp"],
+            type=["jpg", "jpeg", "png", "tif", "tiff", "webp", "heic", "heif"],
         )
         no_api = st.toggle(
             "Skip Claude API",
@@ -211,15 +318,17 @@ def main() -> None:
     summary_cols[2].metric("doc type", result.classification.doc_type)
     summary_cols[3].metric("entities", len(result.entities))
 
-    tab_image, tab_transcription, tab_structured, tab_review = st.tabs(
-        ["Image", "Transcription", "Structured", "Review queue"]
+    tab_image, tab_transcription, tab_structured, tab_summary, tab_review = st.tabs(
+        ["Image", "Transcription", "Structured", "Summary", "Review queue"]
     )
     with tab_image:
         _render_image_tab(result, image_path, threshold)
     with tab_transcription:
-        _render_transcription_tab(result, threshold)
+        _render_transcription_tab(result, image_path, threshold)
     with tab_structured:
         _render_structured_tab(result, image_path)
+    with tab_summary:
+        _render_summary_tab(result, threshold)
     with tab_review:
         _render_review_tab(result, image_path, threshold)
 

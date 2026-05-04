@@ -20,6 +20,7 @@ from typing import Sequence
 
 import anthropic
 from dotenv import load_dotenv
+from PIL import Image, ImageOps
 
 from src.ocr_trocr import Line
 
@@ -86,17 +87,29 @@ def _load_system_prompt() -> str:
 
 
 def _encode_image(image_path: str | Path) -> tuple[str, str]:
-    """Return (base64_data, media_type) for the given image file."""
-    path = Path(image_path)
-    media_type = {
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png": "image/png",
-        ".gif": "image/gif",
-        ".webp": "image/webp",
-    }.get(path.suffix.lower(), "image/jpeg")
-    with open(path, "rb") as f:
-        return base64.standard_b64encode(f.read()).decode("utf-8"), media_type
+    """Return (base64_data, media_type) for the given image file.
+
+    Always re-encodes through PIL as JPEG. Two reasons:
+      1. Anthropic accepts JPEG/PNG/GIF/WebP only — HEIC, TIFF, and other
+         formats common on iPhone / scanner exports must be converted first.
+         Reading the file as raw bytes and labelling it `image/jpeg` (the
+         previous behaviour) trips a 400 "Could not process image" when the
+         contents don't actually match the MIME type.
+      2. PIL's HEIF plugin (registered in src.preprocess) handles HEIC files
+         that are mislabelled with a `.jpg` / `.jpeg` extension by macOS
+         Photos / iPhone exports.
+    """
+    from io import BytesIO
+
+    # Importing src.preprocess registers the HEIF opener as a side effect, so
+    # PIL.Image.open() handles HEIC files even when their extension lies.
+    import src.preprocess  # noqa: F401
+
+    pil = Image.open(image_path)
+    pil = ImageOps.exif_transpose(pil).convert("RGB")
+    buf = BytesIO()
+    pil.save(buf, format="JPEG", quality=92)
+    return base64.standard_b64encode(buf.getvalue()).decode("utf-8"), "image/jpeg"
 
 
 def _build_transcription_block(trocr_lines: Sequence[Line]) -> str:

@@ -15,6 +15,17 @@ from pathlib import Path
 import cv2
 import numpy as np
 from deskew import determine_skew
+from PIL import Image, ImageOps
+
+# Register HEIF/HEIC support with PIL so iPhone photos load through the PIL
+# fallback path. Many iPhone-exported files have a .jpg/.jpeg extension but
+# HEIC contents — without this, PIL.Image.open() fails with UnidentifiedImageError.
+try:
+    from pillow_heif import register_heif_opener
+
+    register_heif_opener()
+except ImportError:
+    pass  # pillow-heif is optional; absence just means HEIC files won't load
 
 
 @dataclass
@@ -32,6 +43,31 @@ def _load_doctr_detector():
     from doctr.models import detection_predictor
 
     return detection_predictor("db_resnet50", pretrained=True, assume_straight_pages=True)
+
+
+def _read_image(image_path: Path) -> np.ndarray:
+    """Read an image as a BGR numpy array.
+
+    cv2.imread is fast but silently returns None on JPEG variants it doesn't
+    handle (HEIC-derived files exported by iPhone Photos, unusual ICC profiles,
+    progressive JPEGs with non-standard markers). We fall back to PIL, which
+    handles those, and also apply EXIF orientation since phone cameras store
+    rotation in metadata rather than rotating pixels.
+    """
+    image = cv2.imread(str(image_path))
+    if image is not None:
+        return image
+    try:
+        pil = Image.open(image_path)
+        pil = ImageOps.exif_transpose(pil).convert("RGB")
+        rgb = np.array(pil)
+        # cv2 expects BGR ordering downstream
+        return rgb[:, :, ::-1].copy()
+    except Exception as exc:
+        raise FileNotFoundError(
+            f"Could not read image: {image_path} "
+            f"(cv2.imread returned None; PIL fallback failed: {exc!r})"
+        )
 
 
 def _to_grayscale(image: np.ndarray) -> np.ndarray:
@@ -153,9 +189,7 @@ def preprocess(
     coordinate frame. Tiny artifacts below the size thresholds are discarded.
     """
     image_path = Path(image_path)
-    image = cv2.imread(str(image_path))
-    if image is None:
-        raise FileNotFoundError(f"Could not read image: {image_path}")
+    image = _read_image(image_path)
 
     deskewed, angle = _deskew(image)
     gray = _to_grayscale(deskewed)

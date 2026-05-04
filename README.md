@@ -76,7 +76,7 @@ python -m src.batch data/raw/loc/abraham-lincoln-papers -o catalogue.csv
 streamlit run app.py
 ```
 
-Pass `--no-api` to any pipeline command to skip the Claude vision post-correction step (TrOCR-only mode).
+Pass `--no-api` to any pipeline command (`src.pipeline`, `src.batch`, or the Streamlit "Skip Claude API" toggle) to skip post-correction, classification, and Claude entity extraction. spaCy NER still runs. Under `--no-api` every line is force-flagged for review with a `NO_API_VERIFICATION` reason — the transcription is unverified raw TrOCR output and shouldn't be trusted as-is.
 
 ## Repo layout
 
