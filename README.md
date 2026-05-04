@@ -56,8 +56,11 @@ No system-level dependencies required. Tested on macOS (Apple Silicon) and Linux
 # 1. Pull a curated LoC sample set
 python scripts/download_loc.py
 
-# 2. Cache the IAM-GW pipeline run (one-shot; produces flagger training data)
-python scripts/cache_iam_gw.py
+# 2. (One-time) cache the IAM-GW pipeline run — produces flagger training data.
+#    Requires IAM-HistDB Washington dataset extracted into data/raw/iam_gw/
+#    (free academic registration at fki.tic.heia-fr.ch).
+python scripts/download_gw_pages.py    # ~4 MB of LoC page scans for visual context
+python scripts/cache_iam_gw.py          # ~5-10 min, ~$0.10 in Claude API
 
 # 3. Single-document end-to-end
 python -m src.pipeline data/samples/letter1.jpg

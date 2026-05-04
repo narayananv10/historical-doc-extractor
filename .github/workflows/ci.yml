@@ -46,5 +46,6 @@ jobs:
           import src.pipeline
           import src.batch
           from src.postcorrect import CorrectedLine, post_correct
+          import scripts.cache_iam_gw
           print('all imports ok')
           "
