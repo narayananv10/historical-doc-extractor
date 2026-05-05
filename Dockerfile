@@ -28,7 +28,16 @@ WORKDIR $HOME/app
 
 # Layer 1 — Python deps. Only invalidated when requirements.txt changes.
 COPY --chown=user requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir --user -r requirements.txt \
+ && pip uninstall -y opencv-python \
+ && pip install --no-cache-dir --user --force-reinstall opencv-python-headless
+# python-doctr[torch] declares opencv-python (the GUI variant) as a transitive
+# dep. Both opencv-python and opencv-python-headless install to the same
+# site-packages/cv2/ directory; whichever pip installs last wins. doctr's
+# install order overwrites our headless cv2 with the GUI one, which then
+# tries to load libxcb at import time and crashes on the slim base image.
+# Explicitly uninstall the GUI variant and force-reinstall headless so the
+# final cv2/ contents are the no-X11 build.
 
 # Layer 2 — pre-cache model weights. Only invalidated when the setup script
 # changes (typically: never).
