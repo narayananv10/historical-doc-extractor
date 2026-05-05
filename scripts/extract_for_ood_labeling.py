@@ -34,9 +34,16 @@ from pathlib import Path
 # Allow running as `python scripts/extract_for_ood_labeling.py` from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from src.pipeline import process
+
+# Vertical context above/below the bbox in the labeling crop. Bigger = more
+# context for ambiguous segmentation, but a busier image. ~30px ≈ one line of
+# typical handwritten text at LoC scan resolution.
+CROP_CONTEXT_PADDING = 40
+HIGHLIGHT_COLOR = "red"
+HIGHLIGHT_WIDTH = 4
 
 DEFAULT_SOURCE = Path("data/hand_labeled/source")
 DEFAULT_OUTPUT = Path("data/hand_labeled/loc_ood.csv")
@@ -66,16 +73,34 @@ def _existing_doc_ids(csv_path: Path) -> set[str]:
         return {row["doc_id"] for row in reader if row.get("doc_id")}
 
 
-def _crop_line(page_image_path: Path, bbox: tuple[int, int, int, int]) -> Image.Image:
-    """Crop a line from the original page image using the bbox from preprocess."""
-    page = Image.open(page_image_path).convert("RGB")
+def _make_contextual_crop(
+    page_image: Image.Image,
+    bbox: tuple[int, int, int, int],
+) -> Image.Image:
+    """Crop a vertical band around the bbox (full page width, +/- padding) and
+    draw a coloured rectangle highlighting the actual line. The labeler shows
+    this so the user can see WHICH line is being labelled even when doctr's
+    segmentation is ambiguous (e.g., when the bbox is tall enough to span
+    multiple visual lines, or when neighbouring lines bleed into the crop)."""
     x, y, w, h = bbox
-    # Defensive clamp — preprocess sometimes returns slightly out-of-bounds boxes
-    x = max(0, x)
-    y = max(0, y)
-    right = min(page.width, x + w)
-    bottom = min(page.height, y + h)
-    return page.crop((x, y, right, bottom))
+    # Vertical context — clamp to page bounds
+    top = max(0, y - CROP_CONTEXT_PADDING)
+    bottom = min(page_image.height, y + h + CROP_CONTEXT_PADDING)
+    # Full page width — gives the user lateral context too
+    crop = page_image.crop((0, top, page_image.width, bottom)).copy()
+
+    # Translate the bbox into crop coordinates and draw the highlight
+    rect_left = max(0, x)
+    rect_right = min(crop.width, x + w)
+    rect_top = y - top
+    rect_bottom = rect_top + h
+    draw = ImageDraw.Draw(crop)
+    draw.rectangle(
+        [rect_left, rect_top, rect_right, rect_bottom],
+        outline=HIGHLIGHT_COLOR,
+        width=HIGHLIGHT_WIDTH,
+    )
+    return crop
 
 
 def main() -> int:
@@ -137,15 +162,19 @@ def main() -> int:
             print(f"[{i}/{len(pending)}] {doc_id}  FAILED: {exc!r}", file=sys.stderr)
             continue
 
+        # Open the page once for cropping all lines from it
+        page_image = Image.open(path).convert("RGB")
+
         with args.output.open("a", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS, extrasaction="ignore")
             if write_header:
                 writer.writeheader()
                 write_header = False
             for line in result.lines:
-                # Save the line crop so the labeler can show it visually
+                # Save a contextual crop with the line bbox highlighted in red
+                # so the labeler can show "this exact line" within its surroundings.
                 try:
-                    crop = _crop_line(path, line.bbox)
+                    crop = _make_contextual_crop(page_image, line.bbox)
                     crop_path = args.crops / f"{doc_id}-{line.line_id:03d}.png"
                     crop.save(crop_path, "PNG")
                 except Exception as exc:

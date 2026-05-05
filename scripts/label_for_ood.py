@@ -102,39 +102,53 @@ def main() -> None:
     else:
         eligible = df[df["doc_id"].astype(str) == doc_filter]
 
+    if len(eligible) == 0:
+        st.warning(f"No rows for document `{doc_filter}`.")
+        return
+
     eligible_unlabelled_idx = [
         i for i in eligible.index if _is_unlabelled(df.iloc[i]["gt"])
     ]
 
-    if not eligible_unlabelled_idx:
-        st.success(
-            f"No more unlabelled rows for `{doc_filter}`. "
-            "Pick another document in the sidebar, or you're done."
-        )
-        with st.expander("Preview first 30 labelled rows"):
-            st.dataframe(
-                df.head(30)[["doc_id", "line_id", "corrected_text", "gt"]],
-                use_container_width=True,
-            )
-        return
-
-    # Track current row in session state so re-runs (e.g. typing) don't reset it
-    if "current_idx" not in st.session_state or st.session_state["current_idx"] not in eligible_unlabelled_idx:
-        st.session_state["current_idx"] = eligible_unlabelled_idx[0]
+    # current_idx can point at ANY eligible row (labelled or not) — that's
+    # what makes Previous work for re-editing existing labels. Initialise
+    # to the first unlabelled row when entering for the first time, or to
+    # the first eligible row if everything is already labelled.
+    if (
+        "current_idx" not in st.session_state
+        or st.session_state["current_idx"] not in eligible.index
+    ):
+        if eligible_unlabelled_idx:
+            st.session_state["current_idx"] = eligible_unlabelled_idx[0]
+        else:
+            st.session_state["current_idx"] = eligible.index[0]
 
     idx = st.session_state["current_idx"]
     row = df.iloc[idx]
+    is_labelled = not _is_unlabelled(row["gt"])
+
+    if not eligible_unlabelled_idx:
+        st.info(
+            f"All rows in `{doc_filter}` are labelled. You're now in **review mode** — "
+            "use Previous / Next to walk through and edit any labels."
+        )
 
     # Header row with metadata
-    h1, h2, h3 = st.columns([2, 1, 1])
+    h1, h2, h3, h4 = st.columns([2, 1, 1, 1])
     h1.markdown(f"**Document:** `{row['doc_id']}`")
     h2.markdown(f"**Line:** `{int(row['line_id']):03d}`")
     h3.markdown(f"**prob_wrong:** `{row['prob_wrong']:.2f}`")
+    h4.markdown("**Status:** ✏️ re-editing" if is_labelled else "**Status:** new")
 
-    # Line image
+    # Line image (contextual: bbox-region with the actual line outlined in red).
+    # The red rectangle marks the line being labelled — everything outside it
+    # is just visual context to help disambiguate when doctr's segmentation is
+    # imperfect (e.g., bbox spans more than one visible line).
     crop_path = CROPS_DIR / f"{row['doc_id']}-{int(row['line_id']):03d}.png"
     if crop_path.exists():
         st.image(str(crop_path), use_container_width=True)
+        st.caption("🟥 The red rectangle marks the line you're labelling. "
+                   "Everything outside it is context.")
     else:
         st.warning(f"Line image not found at `{crop_path}`. Use the texts below.")
 
@@ -147,11 +161,17 @@ def main() -> None:
 
     st.divider()
 
-    # The actual labeling input — pre-populated with the corrected text so easy
-    # lines are one Cmd+Enter
+    # Pre-populate with the existing GT (re-edit case) or the corrected text
+    # (first-label case). [SKIPPED] sentinel rows reset to corrected_text so
+    # the user can rescue them if they decide they're labellable after all.
+    if is_labelled and row["gt"] != SKIP_SENTINEL:
+        default_gt = row["gt"]
+    else:
+        default_gt = row["corrected_text"] or ""
+
     gt_input = st.text_area(
         "Ground truth (edit to match what's actually written in the line image above)",
-        value=row["corrected_text"] or "",
+        value=default_gt,
         height=80,
         key=f"gt_input_{idx}",
         help="Preserve original spelling, capitalisation, and punctuation as written. "
@@ -159,15 +179,20 @@ def main() -> None:
     )
 
     # Action buttons
-    b1, b2, b3, _ = st.columns([1, 1, 1, 3])
+    b1, b2, b3, b4, _ = st.columns([1.2, 1.2, 1, 1, 1.6])
 
     if b1.button("💾 Save & next", type="primary", use_container_width=True):
         df.at[idx, "gt"] = gt_input.strip()
         _save_csv(df)
-        # advance
+        # advance to next UNLABELLED row (skip past anything already done)
         next_idx = _next_unlabelled_index(df, start_from=idx + 1)
         if next_idx is not None:
             st.session_state["current_idx"] = next_idx
+        else:
+            # nothing unlabelled left — just nudge forward by one for review
+            forward = [i for i in eligible.index if i > idx]
+            if forward:
+                st.session_state["current_idx"] = forward[0]
         st.rerun()
 
     if b2.button("⏭️ Skip / unreadable", use_container_width=True):
@@ -179,10 +204,18 @@ def main() -> None:
         st.rerun()
 
     if b3.button("◀ Previous", use_container_width=True):
-        # find the previous index (labelled or not) within eligible
+        # Step back to the previous eligible row (labelled or not).
         prev_candidates = [i for i in eligible.index if i < idx]
         if prev_candidates:
             st.session_state["current_idx"] = prev_candidates[-1]
+            st.rerun()
+
+    if b4.button("Next ▶", use_container_width=True):
+        # Step forward to the next eligible row (labelled or not). Useful in
+        # review mode when you want to walk through everything in order.
+        forward = [i for i in eligible.index if i > idx]
+        if forward:
+            st.session_state["current_idx"] = forward[0]
             st.rerun()
 
 
