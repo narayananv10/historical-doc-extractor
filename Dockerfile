@@ -7,11 +7,12 @@
 # HF Spaces requires the app to listen on 0.0.0.0:7860 and to run as a
 # non-root user (uid 1000). Standard pattern.
 
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 # curl is needed by scripts/setup_models.py to fetch the doctr weights
 # (urllib doesn't follow the 308 redirect; we worked around it with curl).
 RUN apt-get update \
+ && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends curl \
  && rm -rf /var/lib/apt/lists/*
 
