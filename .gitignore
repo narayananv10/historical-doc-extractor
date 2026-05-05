@@ -225,6 +225,9 @@ __marimo__/
 data/raw/
 data/ground_truth/
 data/hand_labeled/
+data/hand_labeled/crops/
+data/hand_labeled/source/
+data/hand_labeled/loc_ood.csv
 
 # Local catalogue runs
 /catalogue.csv

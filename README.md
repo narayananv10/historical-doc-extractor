@@ -50,9 +50,16 @@ scan.jpg
 
 Mean CER barely moves (~11% relative), but **14× more lines are perfect** after post-correction. The bimodal effect fixes nearly-right lines, sometimes adds noise to severely-wrong ones, is what the flagger is built to triage.
 
-**Flagger on residual errors** (5-fold GroupKFold CV on IAM-GW, 656 lines / 20 docs): ROC AUC **0.72**, Brier **0.16**. At the deployable threshold (review-budget = 30%), flagging 30% of lines catches **36% of remaining errors at 92% precision**.
+**Flagger on residual errors:**
 
-> Numbers are in-distribution on the GW benchmark only. A hand-labelled LoC holdout for out-of-distribution validation is documented as a real limitation in `notebooks/calibration.ipynb`.
+| Metric | GW (in-dist, n=656) | Hand-labelled holdout (OOD, n=82) | Drift |
+|---|---|---|---|
+| ROC AUC | 0.72 | **0.84** [95% CI 0.76–0.93] | +0.12 |
+| Brier | 0.16 | 0.17 | +0.00 |
+| 30%-budget recall | 36% | 41% | +5 pp |
+| 30%-budget precision | 0.92 | 0.76 | −16 pp |
+
+OOD validated against a hand-labelled holdout of LoC + personal handwritten pages (different writers, different periods). Discrimination AUC is *higher* on OOD because that holdout includes a cluster of post-correction alignment failures — easy positives for the agreement-signal feature. Precision drops 16pp on OOD because the same agreement signal sometimes flags lines where Claude's rewrite happened to be correct anyway. Calibration (Brier) is essentially unchanged. Full breakdown: [`notebooks/ood_validation.ipynb`](notebooks/ood_validation.ipynb).
 
 ## Install
 
@@ -120,7 +127,7 @@ See [tentative_plan.md](tentative_plan.md) for the full architecture and design 
 
 This project takes a *fail-loudly* posture: every line that gets emitted carries a probability of error and, when flagged, a human-readable explanation. Specifically:
 
-- **Accuracy:** published CER on the IAM-GW public benchmark; flagger evaluated with ROC, Brier, and a reliability diagram in [`notebooks/calibration.ipynb`](notebooks/calibration.ipynb). Out-of-distribution validation against a hand-labeled LoC holdout is **not yet built** and is documented as a real limitation in the calibration notebook.
+- **Accuracy:** published CER on the IAM-GW public benchmark; flagger evaluated with ROC, Brier, and a reliability diagram in [`notebooks/calibration.ipynb`](notebooks/calibration.ipynb), then re-validated on a hand-labelled OOD holdout in [`notebooks/ood_validation.ipynb`](notebooks/ood_validation.ipynb) (n=82, 7 docs spanning two writers and two periods).
 - **Transparency:** flagger feature importances are published in [`notebooks/flagger.ipynb`](notebooks/flagger.ipynb); entities tagged by source (`spacy` vs `claude`); Claude prompts versioned under [`prompts/v1/`](prompts/v1/).
 - **Human oversight:** the Review queue tab surfaces every flagged line with its crop, both the raw and corrected text, the probability, and the reasons.
 - **Accountability:** per-line probability and reasons are persisted to `catalogue.csv` so every downstream record can be audited.
@@ -133,3 +140,4 @@ This project takes a *fail-loudly* posture: every line that gets emitted carries
 | [`flagger.ipynb`](notebooks/flagger.ipynb) | Feature engineering, GroupKFold training, ROC + AUC + Brier, feature importance plot, model bundle save |
 | [`calibration.ipynb`](notebooks/calibration.ipynb) | Reliability diagram, reviewer-budget framing, threshold selection, OOD limitation |
 | [`errors.ipynb`](notebooks/errors.ipynb) | Char-level confusion (substitutions / deletions / insertions), three cherry-picked failure cases with the actual handwriting images, four concrete v2 directions |
+| [`ood_validation.ipynb`](notebooks/ood_validation.ipynb) | Hand-labelled OOD holdout (n=82); ROC AUC + Brier vs in-dist GW; reliability diagram overlay; reviewer-budget table; failure-mode breakdown by `frac_chars_changed` |

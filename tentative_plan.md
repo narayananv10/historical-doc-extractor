@@ -196,7 +196,7 @@ This is the project's headline contribution. The flagger predicts whether a line
 
 Each phase has its own verification. The learned-flagger notebook (phase 6) is the critical path — protect time for it.
 
-1. **Scaffold** — repo skeleton, `requirements.txt`, `download_loc.py`, pull LoC. (Hand-labelling 8 LoC docs into `data/hand_labeled/` was originally a Phase 1 task; deferred — see Phase 7 limitations note. Without the holdout, calibration is in-distribution only.)
+1. **Scaffold** — repo skeleton, `requirements.txt`, `download_loc.py`, pull LoC. (Hand-labelling was originally a Phase 1 task and was deferred until late in the project; eventually closed via `scripts/extract_for_ood_labeling.py` + `scripts/label_for_ood.py` and analysed in `notebooks/ood_validation.ipynb` against 82 hand-labelled rows across 7 docs. Source images and CSV are gitignored to keep the user's personal handwritten content private; the notebook outputs aggregate numbers only.)
 2. **OCR + cache** — `preprocess.py`, `ocr_trocr.py` with per-token logprobs.
 3. **Post-correction** — `src/postcorrect.py` + `prompts/v1/postcorrect.md`. End-to-end on one doc: scan → TrOCR → Claude vision corrections → corrected lines.
 4. **Cache training data** — register for IAM-HistDB, extract `washingtondb-v1.0` into `data/raw/iam_gw/`, then `python scripts/download_gw_pages.py` (pulls 20 LoC page scans for the GW pages, ~4 MB), then `python scripts/cache_iam_gw.py` (TrOCR + post-correction over the FKI line images using LoC page scans for visual context) to produce `data/parquet_cache/iam_gw_pipeline.parquet`. **Commit this parquet** so the flagger notebook can iterate without re-running the heavy steps.
