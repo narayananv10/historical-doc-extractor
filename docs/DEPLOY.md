@@ -22,10 +22,16 @@ The hosted app already defaults the **Skip Claude API** toggle to ON when it det
    - **Owner**: your username
    - **Space name**: `historical-doc-extractor` (or anything you prefer)
    - **License**: MIT (matches the repository)
-   - **SDK**: **Streamlit** (this is the important one — HF will auto-run `streamlit run app.py`)
+   - **SDK**: **Docker**. (HF deprecated the standalone Streamlit SDK; Streamlit apps now run via Docker. The repo ships its own `Dockerfile` so you don't need to pick a template — leave the template dropdown alone or set it to "Blank".)
    - **Hardware**: **CPU basic** (free tier). The app fits in 16 GB RAM after model downloads. GPU is overkill.
    - **Visibility**: Public
 3. Click **Create Space**.
+
+The Dockerfile in the repo:
+- Pre-caches the doctr text-detection weights at build time (works around the 308-redirect bug we documented in `scripts/setup_models.py`)
+- Pre-caches the TrOCR weights so first-user cold-start doesn't pay the ~5 min download tax
+- Runs the app as non-root user `uid=1000` on `0.0.0.0:7860` (HF's required convention)
+- Layered to keep rebuilds fast: dep installs and model downloads stay cached when only `app.py` / `src/` change
 
 ## 3. Configure secrets
 
@@ -61,9 +67,9 @@ Path B is useful for testing changes without merging to GitHub first, but Path A
 
 ## 5. Wait for the first build
 
-The first build takes 8–15 minutes because HF needs to install heavy ML dependencies (PyTorch, transformers, doctr, spaCy + the en_core_web_sm wheel). Watch the **Logs** tab on the Space page.
+The first build takes 10–20 minutes because the Dockerfile both installs heavy ML dependencies (PyTorch, transformers, doctr, spaCy + the en_core_web_sm wheel) and pre-downloads the TrOCR + doctr model weights. Watch the **Logs** tab on the Space page during this.
 
-After the build finishes, the Space starts. The first user upload triggers another ~2 minute delay while TrOCR weights download from HuggingFace and the doctr text-detection model loads. Subsequent uploads are fast.
+The trade-off: longer build, but the first user upload after the Space starts is *fast* — no model-download delay because everything's already in the image. Subsequent rebuilds (triggered by `git push`) are quick because Docker caches the dependency and model layers and only re-runs the application-copy step.
 
 ## 6. Verify
 
@@ -98,10 +104,12 @@ The Anthropic spend cap from step 1 is your hard ceiling regardless.
 
 **Build fails on dependency install (out of memory):** Free CPU tier has 16 GB RAM during build. If pip install OOMs, upgrade to **CPU upgrade** (still free; just gives the build job more RAM headroom).
 
-**App starts but spaCy model not found:** The `en_core_web_sm` wheel URL in `requirements.txt` should install it automatically. If pip skipped the URL line for some reason, add a `pre-build.sh` or set `PIP_EXTRA_INDEX_URL` in Variables. Easiest fix: re-trigger the build via the Space's **Factory rebuild** button.
+**App starts but spaCy model not found:** The `en_core_web_sm` wheel URL in `requirements.txt` should install it automatically. If pip skipped the URL line for some reason, hit the Space's **Factory rebuild** button to force a clean rebuild.
 
-**Streamlit shows "Connection error":** First-load model downloads timed out. Wait 2 minutes and refresh — the models cache to disk after the first successful load.
+**Streamlit shows "Connection error" or 502 on first load:** Container is still starting (the Streamlit process takes ~10 seconds after the build completes to bind port 7860). Wait 30 seconds and refresh.
 
-**Doctr line-detection model fails to download:** Same urllib 308-redirect bug we hit locally. Add a build-time hook that runs `python scripts/setup_models.py` before the app starts. Easiest path: add `pre-startup` script via HF Space settings.
+**Doctr line-detection model not pre-cached:** The Dockerfile runs `scripts/setup_models.py` at build time, which uses `curl` to fetch the weights (working around the urllib 308-redirect bug). If a build log shows the curl step failed, check whether HF Spaces is blocking outbound to `doctr-static.mindee.com` — rare but possible during incident windows. Re-trigger the build later.
 
 **The bottom of every transcription is the same garbage:** A single page got too tall and TrOCR's image processor downsampled it. Increase image quality before upload, or split very tall scans into pages.
+
+**"streamlit: command not found" in container logs:** PATH issue. The Dockerfile installs to `~/.local/bin` and sets `PATH=/home/user/.local/bin:$PATH` — if you forked and modified, make sure that ENV is preserved.
