@@ -81,7 +81,31 @@ Open the Space URL (`https://huggingface.co/spaces/<your-username>/historical-do
 
 To test the full pipeline including Claude calls: toggle **Skip Claude API** off and re-process. This will charge your `ANTHROPIC_API_KEY` (~$0.02 per page).
 
-## 7. Link from your portfolio
+## 7. Redeploy after future changes
+
+Every redeploy uses an orphan branch: HF rejects the parquet (binary-file rule) anywhere in branch history, so we can't just `git push hf main`. The repo includes a script that does the orphan-rebuild + YAML-prepend + force-push automatically.
+
+After merging changes to `main`:
+
+```bash
+scripts/deploy_to_hf.sh
+```
+
+That's it. The script:
+
+1. Confirms `git remote 'hf'` is configured and the working tree is clean
+2. Pulls the latest `main` from origin
+3. Recreates the `hf-deploy` orphan branch from main
+4. Removes `data/parquet_cache/` from the snapshot
+5. Prepends the HF YAML frontmatter to README.md
+6. Commits and force-pushes to `hf/main`
+7. Switches back to your original branch
+
+Pass a different remote name as the first argument if you have multiple Spaces (`scripts/deploy_to_hf.sh hf-staging`).
+
+The first deploy is still manual (this section assumes you've followed steps 1-6 already to create the Space, set secrets, and add the `hf` remote). Subsequent deploys are this one command.
+
+## 8. Link from your portfolio
 
 The Space URL is stable: `https://huggingface.co/spaces/<your-username>/historical-doc-extractor`
 
