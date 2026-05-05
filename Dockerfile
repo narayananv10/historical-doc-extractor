@@ -49,7 +49,14 @@ RUN python scripts/setup_models.py
 COPY --chown=user . .
 
 EXPOSE 7860
+# CORS + XSRF disabled because HF Spaces proxies Streamlit through an iframe;
+# the default XSRF token check rejects the file-upload POST as cross-origin
+# and the browser shows "AxiosError 403". HF's reverse proxy handles
+# same-origin enforcement at the platform layer, so disabling these in
+# Streamlit is safe for this deployment.
 CMD ["streamlit", "run", "app.py", \
      "--server.port=7860", \
      "--server.address=0.0.0.0", \
+     "--server.enableCORS=false", \
+     "--server.enableXsrfProtection=false", \
      "--browser.gatherUsageStats=false"]
