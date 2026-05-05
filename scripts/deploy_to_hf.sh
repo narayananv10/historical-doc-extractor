@@ -40,7 +40,13 @@ die()  { echo "${RED}error:${RESET} $1" >&2; exit 1; }
 
 # YAML frontmatter prepended to README.md on the deploy branch.
 # Keep short_description under 60 chars (HF metadata validator).
-read -r -d '' YAML_BLOCK <<'YAML' || true
+# Note: emit the YAML to a file via a heredoc rather than into a shell var —
+# `read -d ''` strips trailing newlines, which fuses the closing `---` and
+# the first line of the README content (`---# Historical Document Extractor`)
+# and breaks HF's YAML parser. Heredoc-to-file preserves the trailing blank
+# line that separates frontmatter from markdown content.
+write_yaml_block() {
+  cat <<'YAML'
 ---
 title: Historical Document Extractor
 emoji: 📜
@@ -54,6 +60,7 @@ short_description: TrOCR + Claude OCR for historical handwriting
 ---
 
 YAML
+}
 
 # Sanity checks before doing anything destructive.
 if ! git remote get-url "$REMOTE" >/dev/null 2>&1; then
@@ -88,7 +95,7 @@ step "excluding binary parquet from deploy snapshot"
 rm -rf data/parquet_cache
 
 step "prepending HF Spaces YAML frontmatter to README.md"
-{ printf '%s' "$YAML_BLOCK"; cat README.md; } > README.md.new
+{ write_yaml_block; cat README.md; } > README.md.new
 mv README.md.new README.md
 
 step "staging deploy snapshot"
