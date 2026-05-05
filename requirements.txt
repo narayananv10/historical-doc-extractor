@@ -2,7 +2,14 @@ anthropic>=0.40.0
 deskew>=1.5.0
 jiwer>=3.0.0
 matplotlib>=3.7.0
-numpy>=1.24.0
+# Pinned <2.0: spaCy 3.7.x ships thinc 8.2.x, which was compiled against
+# numpy 1.x. With numpy 2.x installed, thinc's C extension hits a binary
+# incompatibility at import time:
+#   ValueError: numpy.dtype size changed (96 from C header, got 88 from PyObject)
+# en_core_web_sm 3.7.1 wheel pins spaCy to 3.7.x, so we can't move forward
+# on the spaCy line without also bumping the model wheel. Pinning numpy
+# below 2.0 is the minimal fix.
+numpy>=1.24.0,<2.0
 opencv-python-headless>=4.8.0
 pandas>=2.0.0
 Pillow>=10.0.0
