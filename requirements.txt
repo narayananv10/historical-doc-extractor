@@ -2,14 +2,7 @@ anthropic>=0.40.0
 deskew>=1.5.0
 jiwer>=3.0.0
 matplotlib>=3.7.0
-# Pinned <2.0: spaCy 3.7.x ships thinc 8.2.x, which was compiled against
-# numpy 1.x. With numpy 2.x installed, thinc's C extension hits a binary
-# incompatibility at import time:
-#   ValueError: numpy.dtype size changed (96 from C header, got 88 from PyObject)
-# en_core_web_sm 3.7.1 wheel pins spaCy to 3.7.x, so we can't move forward
-# on the spaCy line without also bumping the model wheel. Pinning numpy
-# below 2.0 is the minimal fix.
-numpy>=1.24.0,<2.0
+numpy>=1.24.0
 opencv-python-headless>=4.8.0
 pandas>=2.0.0
 Pillow>=10.0.0
@@ -19,11 +12,14 @@ python-doctr[torch]>=0.8.0
 python-dotenv>=1.0.0
 requests>=2.30.0
 scikit-learn>=1.3.0
-spacy>=3.7.0
+spacy>=3.8.0
 # spaCy model wheel pinned by URL so hosted environments (HF Spaces, etc.)
 # don't need a separate `python -m spacy download` step. The README install
 # instructions still work locally because pip handles URL specs natively.
-en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
+# Bumped from 3.7.1 -> 3.8.0 because Python 3.12 wheels for spaCy/thinc are
+# only fully there from spaCy 3.8 onwards; the 3.7-line model on a 3.8 spaCy
+# install fails to load.
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 streamlit>=1.30.0
 torch>=2.0.0
 transformers>=4.40.0
