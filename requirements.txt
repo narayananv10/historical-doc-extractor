@@ -13,6 +13,10 @@ python-dotenv>=1.0.0
 requests>=2.30.0
 scikit-learn>=1.3.0
 spacy>=3.7.0
+# spaCy model wheel pinned by URL so hosted environments (HF Spaces, etc.)
+# don't need a separate `python -m spacy download` step. The README install
+# instructions still work locally because pip handles URL specs natively.
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
 streamlit>=1.30.0
 torch>=2.0.0
 transformers>=4.40.0

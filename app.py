@@ -8,6 +8,7 @@ Run from the repo root:
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from collections import Counter
 from pathlib import Path
@@ -19,6 +20,13 @@ from PIL import Image, ImageDraw
 from src.batch import _entities_by_label, _first_entity
 from src.flagger import describe
 from src.pipeline import DocumentResult, process
+
+# Hosted-mode detection: HF Spaces sets SPACE_ID automatically; HOSTED_DEMO=1
+# is the manual override for any other host (Streamlit Cloud, Render, etc.).
+# When hosted, the --no-api toggle defaults ON to keep API spend bounded against
+# uncontrolled visitor uploads, and a banner explains the trade-off.
+HOSTED_DEMO = bool(os.environ.get("SPACE_ID") or os.environ.get("HOSTED_DEMO"))
+GITHUB_URL = "https://github.com/narayananv10/historical-doc-extractor"
 
 st.set_page_config(
     page_title="Historical Document Extractor",
@@ -268,6 +276,15 @@ def main() -> None:
         "Confidence-aware review queue with per-line probabilities and reason codes."
     )
 
+    if HOSTED_DEMO:
+        st.info(
+            "**Hosted demo** — `Skip Claude API` is on by default to control API costs. "
+            "TrOCR + spaCy NER still run end-to-end and every line is flagged for review. "
+            "For the full pipeline (Claude vision post-correction + classify + custom-entity "
+            "extraction), clone the repo and add your own `ANTHROPIC_API_KEY`.",
+            icon="ℹ️",
+        )
+
     with st.sidebar:
         st.header("Input")
         uploaded = st.file_uploader(
@@ -276,11 +293,12 @@ def main() -> None:
         )
         no_api = st.toggle(
             "Skip Claude API",
-            value=False,
+            value=HOSTED_DEMO,
             help=(
                 "Skip post-correction, classification, and Claude entity "
                 "extraction. spaCy NER still runs. The flagger falls back to "
-                "rule-based mode (no learned-model context)."
+                "rule-based mode (no learned-model context). Defaults ON in "
+                "hosted demos to control API spend."
             ),
         )
         threshold = st.slider(
@@ -289,6 +307,13 @@ def main() -> None:
             help="Lines with `prob_wrong` above this are flagged.",
         )
         run = st.button("Process", type="primary", disabled=not uploaded)
+
+        st.divider()
+        st.markdown(
+            f"[![View source on GitHub]"
+            f"(https://img.shields.io/badge/GitHub-View_Source-181717?logo=github&style=for-the-badge)]"
+            f"({GITHUB_URL})"
+        )
 
     if run and uploaded is not None:
         suffix = Path(uploaded.name).suffix or ".jpg"

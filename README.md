@@ -5,8 +5,11 @@ End-to-end ingestion of historical handwritten archives into structured, human-r
 The same pipeline shape generalizes to anything a fast-moving organization needs to digest reliably from images: archived correspondence, leaked documents, court filings, scanned press releases.
 
 <!-- TODO: link to the longer-form Substack write-up here once published -->
+<!-- TODO: replace with the public Hugging Face Space URL once deployed (see docs/DEPLOY.md) -->
 
 ![Streamlit demo](docs/demo.gif)
+
+> **Live demo**: see [docs/DEPLOY.md](docs/DEPLOY.md) for step-by-step Hugging Face Spaces setup.
 
 ## Architecture
 

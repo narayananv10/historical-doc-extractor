@@ -1,0 +1,29 @@
+# Don't bloat the build context with files the runtime doesn't need.
+
+# Python build artifacts
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Git metadata + CI config
+.git/
+.github/
+
+# Notebooks and analysis assets — useful in the repo, not at runtime
+notebooks/
+tentative_plan.md
+docs/
+*.gif
+
+# Raw / unlabeled data — large, gitignored, not needed at runtime
+data/raw/
+data/hand_labeled/
+data/ground_truth/
+
+# Local secrets (Anthropic / HF tokens come from HF Space secrets at runtime)
+.env
+
+# OS noise
+.DS_Store
